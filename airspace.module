@@ -1,0 +1,89 @@
+<?php
+
+/**
+ * @file
+ * Module file for the airspace.
+ */
+
+
+/**
+ * Implements hook_theme
+ */
+function airspace_theme(){
+  return array(
+    'airspace_page' =>  array(
+      'template' => 'airspace',
+      'render element' => 'page'
+    ),
+  );
+}
+
+function airspace_preprocess_html(&$variables, $hook) {
+	if (isset($variables['theme_hook_suggestions'][0]) && $variables['theme_hook_suggestions'][0] == 'html__espace_aerien' ){
+		unset($variables['page']['page_top']['toolbar']);
+	}
+}
+
+
+function airspace_preprocess_page(&$variables, $hook) {
+	if (isset($variables['theme_hook_suggestions'][0]) && $variables['theme_hook_suggestions'][0] == 'page__espace_aerien' ){
+		$variables['theme_hook_suggestions'][] = 'airspace_page';
+		//dsm($variables);
+	}
+}
+
+/**
+ * Implements hook_menu
+ */
+function airspace_menu(){
+	$items['espace-aerien'] = array(
+	    'title' => 'Espace aérien',
+	    'page callback' => 'airspace_show',
+    	    'access arguments' => array('access content'),
+    	    'type' => MENU_CALLBACK,
+  	);
+
+	return $items;	
+}
+
+function airspace_show(){
+	$output = "";
+
+	drupal_add_js('https://www.google.com/jsapi', 'external');
+	drupal_add_js(drupal_get_path('module', 'airspace') . '/airspace.js', array('type' => 'file'));	
+	drupal_add_css(drupal_get_path('module', 'airspace') . '/airspace.css', array('type' => 'file'));
+
+	$box = "<div id='selectZone' class='frame'>";
+	$class = '';
+	$query = db_query("SELECT * FROM {airspaces} ORDER BY class ASC, name");
+	while ($data = $query->fetchObject()){
+		if ($class != $data->class){	
+			if ($class != ''){$box .= '</ul>';}
+			$class = $data->class;
+			$cleanClass = str_replace(" ", "", $data->class);
+			$box .= "<ul class='zone' id='".$cleanClass."'><span id='".$cleanClass."' class='chef'>".$cleanClass.'</span>'; 
+		}
+		
+		$box .= "<li class='airspace' id='".$data->gid."'><input class='space' id='".$data->gid."' type='checkbox' value='".$data->gid."' name='".$data->name."' />".$data->name."</li>";
+	}	
+	$box .= "</div>";
+
+
+	$box .= "<div id='selectSite' class='frame'><ul id='sitedeco'> <span id='alldeco' class='chef'> Décollages :</span>";
+	$query = db_query("SELECT * FROM {ffvl_deco} ORDER BY nom");
+	while ($data = $query->fetchObject()){
+		$box .= "<li class='site' id='".$data->id."'><input class='deco' id='".$data->id."' type='checkbox' value='".$data->id."' name='".$data->nom."' />".$data->nom."</li>";
+	}
+	$box .= "</ul></div>";
+
+	$output .= $box;
+	$output .= "<div id='map3d' style='height: 100%; width: 100%;'></div> ";	
+	$output .= " <div id='controlbar'>";
+	$output .= " <input id='crospace' class='window' type='submit' value='Voir les espaces aériens dans cette zone'>";
+	$output .= " <input id='crosite' class='window' type='submit' value='Voir les décollages dans cette zone'>";
+	$output .= " <input id='windowspace' class='window' type='submit' value='Gérer les espaces'>";
+	$output .= " <input id='windowdeco' class='window' type='submit' value='Gérer les décos'>";
+	$output .= " </div>";
+	return $output;
+
+}

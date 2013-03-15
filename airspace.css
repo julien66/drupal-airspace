@@ -1,0 +1,84 @@
+/*@css file by Julien Garcia */
+
+html, body{
+	height:100%;
+	min-height:480px;
+	background-color:#000;
+}
+
+
+#block-system-main .content{
+	min-height:100%;
+}
+
+ul#ZRT{
+	padding-bottom:40px;
+}
+
+.region-content ul.zone, .region-content ul.sitedeco{
+	margin:0px 0px 10px 0px;
+	padding:0px;
+	text-align:center;
+	color:#FFF;
+}
+
+#map3d{
+	width: 100%;
+	min-height:100%;
+	position:fixed;
+	left:0px;
+	bottom:40px;
+	z-index:0;
+}
+
+#controlbar, .window{
+	position: fixed;
+	z-index : 1;
+	bottom:0%;
+}
+
+#controlbar{
+	border-top: 1px solid #3B3B3B;
+	height:39px;
+	width:100%;
+	background-color:#000;
+}
+
+.frame{
+	z-index : 0;
+	position:absolute;
+	left:0px;
+	min-height:100%;
+	top:0px;
+	width:199px;
+	border-right: 1px solid #3B3B3B;
+}
+
+span.chef{
+	cursor:pointer;
+	color:#FFF;
+}
+
+.frame ul li {
+	list-style-type:none;
+	text-align:left;
+	text-overflow: ellipsis;
+	color:#666;
+	-webkit-user-select: none;
+	-khtml-user-select: none;
+	-moz-user-select: none;
+	-o-user-select: none;
+	user-select: none;
+}
+
+#crosite{left:280px;}
+#windowspace{right:120px;}
+#windowdeco{right:0px;}
+
+#selectZone, #selectSite {
+	display:none;
+}
+
+#selectZone .airspace, #selectSite .site{
+	display:none;
+}

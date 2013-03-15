@@ -1,0 +1,5 @@
+name = airspace
+description = Stocke et affiche les espaces aériens.
+package = FFVL
+core = 7.x
+php = 5.2
