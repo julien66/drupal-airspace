@@ -1,0 +1,31 @@
+/* @ CSS file by Juju */
+
+#map2d{
+	margin-right:10px;
+}
+
+#map2d, #pointlist , #controls {
+	display:inline-table;
+	vertical-align:top;
+}
+
+#pointlist{
+	width:25%;
+}
+
+#controls{
+	width:10%;
+}
+
+#controls input{
+	width: 100%;
+}
+
+#block-system-main p, #block-system-main span{
+	margin:0px;
+	font-size:11px;
+}
+
+.simplification{
+	display: none;
+}

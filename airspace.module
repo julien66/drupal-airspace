@@ -1,10 +1,673 @@
 <?php
 
+
 /**
  * @file
  * Module file for the airspace.
+ * WARNING !! This module require some gis table to be installated beffore being activated !
+ * WARNING !! This module needs GDAL + shp2pgsql software + proper permission for drupal user on file pg_hba.conf  
  */
 
+
+/**
+ * Implements hook_node_info
+ */
+/* function airspace_node_info(){
+	return array(
+    		'zone' => array(
+    			'name' => t('Zone'),
+    			'base' => 'zone',
+    			'description' => t('Une zone aérienne'),
+    			'has_title' => TRUE
+    		),
+  	);
+}
+
+function zone_form(){
+	$form['title'] = array(
+    		'#type' => 'textfield',
+    		'#title' => t('Nom de la zone'),
+    		'#default_value' => !empty($node->title) ? $node->title : '',
+    		'#required' => TRUE,
+    		'#weight' => -5
+	);
+	
+	return $form;
+} */
+
+/**
+ * Implements hook_node_view;
+ */
+
+function airspace_node_view($node, $view_mode, $langcode){
+	//dsm($node);
+	if ($node->type !== 'espace_aerien'){return;}
+
+	if (file_exists("sites/all/files/airspace_images/".$node->vid.".jpg")){
+		$node->content['airspace_images'] = array(
+   			 '#markup' => '<img alt="zone_image" src="/sites/all/files/airspace_images/'.$node->vid.'.jpg"/></br>',
+    			 '#weight' => 10,
+  		);
+	}
+
+	$decos = db_query("SELECT gd.nom FROM {gis_airspace_deco} d INNER JOIN {gis_deco} gd ON gd.id = d.id WHERE d.vid=:vid ORDER BY gd.nom", array(':vid'=>$node->vid));
+	$outputdeco = '';	
+	foreach($decos as $deco){
+		$outputdeco .= $deco->nom.' ';
+	}
+
+	$node->content['airspace_decos'] = array(
+   		 '#markup' => "Les décollages qui coïncident avec cette zone sont : ".$outputdeco."</br>",
+    		 '#weight' => 11,
+  	);
+
+	$deps = db_query("SELECT gc.nom_dept as nom FROM {gis_airspace_dep} d INNER JOIN {gis_departement} gc ON gc.id_geofla = d.id WHERE d.vid=:vid ORDER BY gc.nom_dept",array(':vid'=>$node->vid));
+	$outputdep = '';	
+	foreach($deps as $dep){
+		$outputdep .= $dep->nom.' ';
+	}
+
+	$coms = db_query("SELECT gc.nom_comm as nom FROM {gis_airspace_com} c INNER JOIN {gis_communes} gc ON gc.id_geofla = c.id  WHERE c.vid=:vid ORDER BY gc.nom_comm",array(':vid'=>$node->vid));
+	$outputcom = '';	
+	foreach($coms as $com){
+		$outputcom .= $com->nom.' ';
+	}
+	
+	$node->content['airspace_com_dep'] = array(
+   		 '#markup' => "Cette zone s'étend en : ".$outputdep." <br/> Les communes ayant une intersection avec cette zone sont : ".$outputcom.'</br>',
+    		 '#weight' => 12,
+  	);
+
+	$zones = db_query("SELECT n.title as nom, gaa.id as rev FROM gis_airspace_air gaa INNER JOIN node_revision nr ON nr.vid=gaa.id INNER JOIN node n ON n.nid=nr.nid WHERE gaa.vid=:vid",array(':vid' => $node->vid));
+
+	$outputzone = '';
+	foreach($zones as $zone){
+		$outputzone .= $zone->nom.' révision : '.$zone->rev;
+	}
+
+	$node->content['airspace_air'] = array(
+   		 '#markup' => "Cette zone coupe d'autres zones : ".$outputzone,
+    		 '#weight' => 13,
+  	);
+
+	$node->content['airspace_download'] = array(
+		   	'#markup' => "<ul>".
+					"<li>".l("Fichier openAir", "sites/all/files/airspace_openair/".$node->vid.".txt")."</li>".
+					"<li>".l("Fichier kml en 2D", "sites/all/files/airspace_kml/".$node->vid.".kml")."</li>".
+				        "<li>".l("Fichier kml en 3D", "sites/all/files/airspace_kml3d/".$node->vid.".kml")."</li>".
+				      "</ul>",
+	    		'#weight' => 14,		
+	);
+}
+
+/**
+ * Implements hook_node_delete
+ */
+// Je dois enlever toutes les informations associées à ce node.
+function airspace_node_delete($node){
+	if ($node->type == "espace_aerien"){		
+		//delete_associated_image($node->vid);
+		// Get all revision and erase all associated content !!
+		$vids = db_query("SELECT vid FROM {node_revision} WHERE nid = :nid ",array(':nid'=>$node->nid));
+		foreach($vids as $vid){
+			delete_associated_image($vid->vid);
+			delete_associated_geom($vid->vid);			
+			delete_associated_openair_file($vid->vid);			
+			delete_associated_dep_com($vid->vid);				
+			delete_associated_deco($vid->vid);
+			delete_associated_air($vid->vid);
+			delete_associated_kml($vid->vid);
+			delete_associated_kml3d($vid->vid);
+		}
+	} 
+}
+
+/**
+ * Implements hook_node_revison_delete
+ */
+// Je dois enlever toutes les informations associées à cette révision au moment de l'update
+function airspace_node_revision_delete($node){	
+	if ($node->type == "espace_aerien"){
+		delete_associated_image($node->vid);
+		delete_associated_geom($node->vid);
+		delete_associated_openair_file($node->vid);
+		delete_associated_dep_com($node->vid);
+		delete_associated_deco($node->vid);
+		delete_associated_air($node->vid);
+		delete_associated_kml($node->vid);		
+		delete_associated_kml3d($node->vid);
+	}
+}
+
+function delete_associated_image($vid){ // Efface la google map statique éventuellement associée.
+	if (file_exists("sites/all/files/airspace_images/".$vid.".jpg")){
+		unlink("sites/all/files/airspace_images/".$vid.".jpg");
+	}
+}
+
+function delete_associated_openair_file($vid){ // Efface le fichier openair qui a servi à créer la zone.
+	if (file_exists("sites/all/files/airspace_openair/".$vid.".txt")){
+		unlink("sites/all/files/airspace_openair/".$vid.".txt");
+	}	
+}
+
+function delete_associated_geom($vid){ // Efface la géometrie de la base de donnée
+	db_query("DELETE FROM {gis_airspaces} WHERE vid=:vid",array(':vid'=>$vid));
+}
+
+function delete_associated_dep_com($vid){
+	db_query("DELETE FROM {gis_airspace_dep} WHERE vid=:vid",array(':vid'=>$vid));
+	db_query("DELETE FROM {gis_airspace_com} WHERE vid=:vid",array(':vid'=>$vid));
+}
+
+function delete_associated_deco($vid){
+	db_query("DELETE FROM {gis_airspace_deco} WHERE vid=:vid",array(':vid'=>$vid));
+}
+
+function delete_associated_air($vid){
+	db_query("DELETE FROM {gis_airspace_air} WHERE vid=:vid",array(':vid'=>$vid));
+}
+
+function delete_associated_kml($vid){
+	if (file_exists("sites/all/files/airspace_kml/".$vid.".kml")){
+		unlink("sites/all/files/airspace_kml/".$vid.".kml");
+	}
+}
+
+function delete_associated_kml3d($vid){
+	if (file_exists("sites/all/files/airspace_kml3d/".$vid.".kml")){
+		unlink("sites/all/files/airspace_kml3d/".$vid.".kml");
+	}
+}
+
+/**
+ * Implement hook_form_alter
+ */
+function airspace_form_espace_aerien_node_form_alter(&$form, &$form_state, $form_id){
+	$form['#validate'][] = 'check_coords';
+}
+
+function check_coords($form, &$form_state){
+
+	/*$air = drupal_http_request("http://geolocalisation.ffvl.fr/".drupal_get_path('module', 'airspace')."/airspace.txt");
+	preg_match( '@^AC([a-zA-Z0-9\s])*\nAN(\s)*'.$form_state["values"]['title'].'[a-zA-Z0-9\s=,:*\/_-]*\s$@ms' ,$air->data, $matches);
+	// openAir can be found at $matches[0]
+	dsm($matches[0]);*/
+
+	$coords = $form_state['values']['field_coords']['und'][0]['value'];
+	if ( !isset($coords) || $coords == '' ){
+		return form_set_error('field_coords', "Votre espace ne peut pas être crée car il ne contient pas de coordonées !");
+	}
+
+	// Ici je dois vérifier les données de l'openair.
+	// 1) Le fichier doit contenir AC AH AN AL au minima...
+	if (strpos($coords,'AC') === false || strpos($coords,'AH') === false || strpos($coords,'AN') === false || strpos($coords,'AL') === false){
+			return form_set_error('field_coords', "Votre espace ne peut pas être crée. Il manque des marqueurs à votre format openAir : AC AH AN AL doivent obligatoirement être présent. Pensez aussi à revennir à la ligne pour chaque nouveau marqueur.");
+	}					
+
+	// 2) Est-ce qu'il n'y a qu'une seule zone dans ce fichier ?
+	if (substr_count($coords, 'AN') > 1){
+		return form_set_error('field_coords', "Votre espace ne peut pas être crée. Votre fichier semble comporter plusieurs zones. (Multiple marqueur AN détecté). Merci d'utiliser le 'gros' importeur de zones pour importer plusieurs zones à la fois !");
+	}		
+			
+	// 3) Est-ce que le titre du node est le même que le AN du fichier ?
+	preg_match('@^AN(.*)@m' ,$coords, $matches);
+	if (isset($matches[1])){
+		$AN = trim($matches[1]);	
+	}
+
+	if ($form_state['values']['title'] != $AN){
+		$form_state['values']['title'] = $AN;
+		drupal_set_message('Le nom de cet espace a été changé pour correspondre à celui de sa zone openAir (marqueur AN).');
+	}
+}
+
+
+function cleanup_coords_to_openair_file($coords, $vid, $title){
+		if (isset($coords)){ 
+			// Apparement la zone doit attaquer par /** title **/ pour passer tranquillement avec ogr2ogr
+			if (strpos($coords,'/*') === false && strpos($coords,'*/') === false){
+				file_put_contents ("sites/all/files/airspace_openair/".$vid.".txt", "/** ".$title." **/ \n");
+				dsm("Un entête de fichier a été ajouté à ces coordonnées '/** ".$title." **/' ");
+			}
+
+			file_put_contents ("sites/all/files/airspace_openair/".$vid.".txt", $coords, FILE_APPEND);
+		}
+}
+
+function create_geom_from_openair($vid, $title){
+	openair_to_postgis("sites/all/files/airspace_openair/".$vid.".txt", "APPEND");
+	$escape = pg_escape_string($title);
+	$geom = db_query("SELECT the_geom FROM {gis_temporary_airspaces} WHERE name='".$escape."' ORDER BY gid DESC")->fetchField();
+	if (isset($geom)){
+		db_query("INSERT INTO {gis_airspaces} (vid, the_geom) VALUES (:vid, :geom)",array(':vid'=>$vid, ':geom'=>$geom));
+	}else{
+		drupal_set_message("Ces coordonnées OpenAir n'ont pas pu être traduites dans POSTGIS par Ogr2ogr. Vérifiez le format.", "error");
+	}
+}
+
+function fullfill_field($coords, $node){
+	preg_match('@^AN(.*)@m' ,$coords, $matches);
+	if (isset($matches[1])){
+		$AN = trim($matches[1]);	
+	}
+
+	preg_match('@^AC(.*)@m' ,$coords, $matches);
+	if (isset($matches[1])){	
+		$AC = trim($matches[1]);
+	}
+
+	preg_match('@^AL(.*)@m' ,$coords, $matches);
+	if (isset($matches[1])){
+		$AL = trim($matches[1]);
+	}
+
+	preg_match('@^AH(.*)@m' ,$coords, $matches);
+	if (isset($matches[1])){
+		$AH = trim($matches[1]);
+	}
+
+	// A la detection des paramètres, je remplis les champs correspondants. Plancher, Plafond, Classe.
+	$node->field_plancher['und'][0]['value'] = $AL;	
+	$node->field_plafond['und'][0]['value'] = $AH;
+	$node->field_classe['und'][0]['value'] = $AC;
+	return $node;
+}
+
+/**
+ * Implements hook_node_insert
+ */
+// Je profite de l'update pour ajouter des informations sur cet espace aérien.
+// Je veux ajouter : une carte Google Map Statique, les communes et départements concernées par cette zone aérienne. Les sites de Vol Libre directement en intersection 2D. Les autres zones intersectées. Le fichier openair. Les fichiers kml.
+
+function airspace_node_insert($node){ 
+	//dsm($node);
+	if ($node->type == "espace_aerien"){
+		$coords = $node->field_coords['und'][0]['value'];
+		cleanup_coords_to_openair_file($coords, $node->vid, $node->title); // Je mets les coords dans un fichier openair nettoyé au nom de la vid.
+		$node = fullfill_field($coords, $node); // Remplis les champs importants du node.
+		$title = $node->title;
+		$plancher = $node->field_plancher['und'][0]['value'];	
+		$plafond = $node->field_plafond['und'][0]['value'];
+		$classe = $node->field_classe['und'][0]['value'];
+		create_geom_from_openair($node->vid, $node->title); // Je crée la geom à partir du fichier.
+		create_geom_3d($node->vid, $title, $plafond, $plancher, $classe); // La géométrie en 3D.
+		create_associated_image($node->title, $node->vid); // Je crée l'image google map static.
+		get_dep_com_intersection($node->vid); // Je crée les intersections département / communes avec la zone.
+		get_deco_intersection($node->vid); // Je crée les intersections avec les décos FFVL.
+		get_zone_intersection($node->vid); // Je crée les intersections avec les autres zones.
+		create_kml_from_geom($node->vid, $title, $plafond, $plancher, $classe); // Je crée le fichier kml.
+		if (check_valide($node) == 1){
+			$node->field_valide['und'][0]['value'] = "1";
+		}
+		field_attach_update('node', $node);
+	}	
+}
+
+/**
+ * Implements hook_node_update
+ */
+// Je profite de l'update pour ajouter des informations sur cet espace aérien.
+// Je veux ajouter : une carte Google Map Statique, les communes et départements concernées par cette zone aérienne. Les sites de Vol Libre directement en intersection 2D. Les autres zones intersectées. Le fichier openair. Les fichiers kml.
+
+function airspace_node_update($node){ 
+	//dsm($node);
+	if ($node->type == "espace_aerien"){
+		$coords = $node->field_coords['und'][0]['value'];
+		cleanup_coords_to_openair_file($coords, $node->vid, $node->title); // Je mets les coords dans un fichier openair nettoyé au nom de la vid.
+		$node = fullfill_field($coords, $node); // Remplis les champs importants du node.
+		$title = $node->title;
+		$plancher = $node->field_plancher['und'][0]['value'];	
+		$plafond = $node->field_plafond['und'][0]['value'];
+		$classe = $node->field_classe['und'][0]['value'];
+		create_geom_from_openair($node->vid, $node->title); // Je crée la geom à partir du fichier.
+		create_geom_3d($node->vid, $title, $plafond, $plancher, $classe); // La géométrie en 3D.
+		create_associated_image($node->title, $node->vid); // Je crée l'image google map static.
+		get_dep_com_intersection($node->vid); // Je crée les intersections département / communes avec la zone.
+		get_deco_intersection($node->vid); // Je crée les intersections avec les décos FFVL.
+		get_zone_intersection($node->vid); // Je crée les intersections avec les autres zones.
+		create_kml_from_geom($node->vid, $title, $plafond, $plancher, $classe); // Je crée le fichier kml.
+		if (check_valide($node) == 1){
+			$node->field_valide['und'][0]['value'] = "1";
+		}
+		field_attach_update('node', $node);
+	}	
+}
+
+function check_valide($node){
+	if ( file_exists("sites/all/files/airspace_kml3d/".$node->vid.".kml") && file_exists("sites/all/files/airspace_kml/".$node->vid.".kml") && file_exists("sites/all/files/airspace_images/".$node->vid.".jpg") && file_exists("sites/all/files/airspace_openair/".$node->vid.".txt") && isset($node->field_plancher['und'][0]['value']) && isset($node->field_plafond['und'][0]['value']) && isset($node->field_classe['und'][0]['value']) ){
+		return 1;
+	}
+		return 0;
+}
+
+function create_geom_3d($vid, $title, $plaf, $planch, $classe){
+
+	$transaction = db_transaction();
+	try{
+		$query = db_query("SELECT ST_X(geom) x, ST_Y(geom) y FROM
+(SELECT (ST_DumpPoints( ST_SimplifyPreserveTopology(the_geom,0.0001) ) ).* FROM gis_airspaces WHERE vid=:vid) t", array(':vid'=>$vid))->fetchAll();
+	}
+	catch(Exception $e){
+		$transaction->rollback();
+		return;
+	}
+	
+	if (!isset($query[0]) ){
+		dsm("Mauvaise requête");
+	}
+
+	$plafond = _get_real_alti($plaf);	
+	$plancher = _get_real_alti($planch);
+
+	$l = count($query);
+
+	$poly = "ST_GeomFromText('MULTIPOLYGON( ((";
+	$kml = '<MultiGeometry><Polygon><altitudeMode>absolute</altitudeMode><outerBoundaryIs><LinearRing><coordinates>';
+	for ($i = 0; $i < $l; $i++){ // Le polygone de base.
+		$poly .= $query[$i]->x.' '.$query[$i]->y.' '.$plancher[0].' ,'; // Connection vers le point suivant.
+		$kml .= $query[$i]->x.','.$query[$i]->y.','.$plancher[0].' ';
+	}
+	$poly .= $query[0]->x.' '.$query[0]->y.' '.$plancher[0] ; // Le retour au point de départ du polygone.
+	$kml .= $query[0]->x.','.$query[0]->y.','.$plancher[0] ;
+	$poly .= ')),';
+	$kml .= '</coordinates></LinearRing></outerBoundaryIs></Polygon>';
+
+	for ($i = 0; $i < $l; $i++){ // Les polygones des côtés.
+		if ($i%2 == 0){
+			if ($i == ($l-1)){break;}
+			$poly .= '(('.$query[$i]->x.' '.$query[$i]->y.' '.$plancher[0].' ,'.$query[$i]->x.' '.$query[$i]->y.' '.$plafond[0].' ,';	
+			$kml .= '<Polygon><altitudeMode>absolute</altitudeMode><outerBoundaryIs><LinearRing><coordinates>'.$query[$i]->x.','.$query[$i]->y.','.$plancher[0].' '.$query[$i]->x.','.$query[$i]->y.','.$plafond[0].' ';	
+		}	
+		else{
+			$poly .= $query[$i]->x.' '.$query[$i]->y.' '.$plafond[0].' ,'.$query[$i]->x.' '.$query[$i]->y.' '.$plancher[0].','.$query[($i-1)]->x.' '.$query[($i-1)]->y.' '.$plancher[0].')),'; // Il faut revenir au point de départ du polygone.
+			$kml .= $query[$i]->x.','.$query[$i]->y.','.$plafond[0].' '.$query[$i]->x.','.$query[$i]->y.','.$plancher[0].' '.$query[($i-1)]->x.','.$query[($i-1)]->y.','.$plancher[0].'</coordinates></LinearRing></outerBoundaryIs></Polygon>';
+		}
+	}
+
+	$poly .= '((';
+	$kml .= '<Polygon><altitudeMode>absolute</altitudeMode><outerBoundaryIs><LinearRing><coordinates>';
+
+	for ($i = 0; $i < $l; $i++){ // Le polygone du haut.
+		$poly .= $query[$i]->x.' '.$query[$i]->y.' '.$plafond[0].' ,'; // Connection vers le point suivant.
+		$kml .= $query[$i]->x.','.$query[$i]->y.','.$plafond[0].' ';
+	}
+	$poly .= $query[0]->x.' '.$query[0]->y.' '.$plafond[0] ; // Le retour au point de départ du polygone.
+	$kml .= $query[0]->x.','.$query[0]->y.','.$plafond[0] ;
+	
+	$poly .= ")) )', 4326)";
+	$kml .= '</coordinates></LinearRing></outerBoundaryIs></Polygon></MultiGeometry>';
+
+	$kml = template_single_kml($kml, $title, $plaf, $planch, $classe);
+	file_put_contents ("sites/all/files/airspace_kml3d/".$vid.".kml", $kml);		
+	db_query("UPDATE gis_airspaces SET geom3d=".$poly." WHERE vid=:vid", array(':vid'=>$vid));
+}
+
+function template_single_kml($kml, $title, $plafond, $plancher, $classe){
+	return '<?xml version="1.0" encoding="UTF-8"?>' .
+  			'<kml xmlns="http://www.opengis.net/kml/2.2"' .
+			 ' xmlns:gx="http://www.google.com/kml/ext/2.2">' .
+			'<Document>' .
+			'    <Style id="A">' .
+      			'	<LineStyle>' .
+        		'		<color>64F01414</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>1eF01414</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'    <Style id="B">' .
+      			'	<LineStyle>' .
+        		'		<color>64F01414</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>1eF01414</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'    <Style id="C">' .
+      			'	<LineStyle>' .
+        		'		<color>64F01414</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>1eF01414</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'    <Style id="CTR">' .
+      			'	<LineStyle>' .
+        		'		<color>641400FF</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>1e1400FF</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'    <Style id="D">' .
+      			'	<LineStyle>' .
+        		'		<color>64F01414</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>1eF01414</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'    <Style id="P">' .
+      			'	<LineStyle>' .
+        		'		<color>641400FF</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>1e1400FF</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'    <Style id="R">' .
+      			'	<LineStyle>' .
+        		'		<color>641400FF</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>1e1400FF</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'    <Style id="GP">' .
+      			'	<LineStyle>' .
+        		'		<color>643CFF14</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>143CFF14</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'<Style id="E">' .
+      			'	<LineStyle>' .
+        		'		<color>64F0B414</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>1eF0B414</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'<Style id="Q">' .
+      			'	<LineStyle>' .
+        		'		<color>64F01414</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>1eF01414</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'<Style id="W">' .
+      			'	<LineStyle>' .
+        		'		<color>64F01414</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>1eF01414</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'<Style id="ZRT">' .
+      			'	<LineStyle>' .
+        		'		<color>64000000</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>41000000</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+			'<Style id="VL">' .
+      			'	<LineStyle>' .
+        		'		<color>643CFF14</color>' .
+        		'		<width>2</width>' .
+      			'	</LineStyle>' .
+      			'	<PolyStyle>' .
+        		'		<color>143CFF14</color>' .
+      			'	</PolyStyle>' .
+    			'</Style>' .
+  			'  <Placemark>' .
+  			'    <name>'. $title .'</name>' .
+			'    <description>' .
+			' 		   <b> Classe : </b> '. $classe . '<br/>' .
+			'		   <img src="http://geolocalisation.ffvl.fr/'.drupal_get_path('module', 'airspace').'/icon/up.gif"/>'.
+						$plafond . '<br/>' .
+			'		   <img src="http://geolocalisation.ffvl.fr/'.drupal_get_path('module', 'airspace').'/icon/down.gif"/>'.
+						$plancher . '<br/>' .
+			'    </description>' .
+			'    <styleUrl>#'.$classe.'</styleUrl>' .
+			$kml .
+  			'  </Placemark>' .
+			' </Document>' .
+  			'</kml>' ;
+}
+
+
+function create_kml_from_geom($vid, $title, $plafond, $plancher, $classe){
+	$kml = get_kml_by_vid($vid);
+	$kml = template_single_kml($kml, $title, $plafond, $plancher, $classe);
+	file_put_contents ("sites/all/files/airspace_kml/".$vid.".kml", $kml);	
+}
+
+function get_kml_by_vid($vid){
+	$transaction = db_transaction();
+	try{
+		$kml = db_query("SELECT ST_AsKml(ST_SimplifyPreserveTopology(the_geom,0.0001),5) as kml FROM gis_airspaces WHERE vid=:vid",array(':vid'=>$vid))->fetchField();
+	}
+	catch(Exception $e){
+		$transaction->rollback();
+		return;
+	}
+	//dsm($kml);
+	return $kml;
+}
+
+function get_zone_intersection($vid){
+	$transaction = db_transaction();
+	try{
+	$airs = db_query("SELECT d.vid as id FROM {gis_airspaces} d, {gis_airspaces} a WHERE a.vid=:vid AND d.vid!=:vid AND ST_Intersects(a.the_geom, d.the_geom)= true",array(':vid'=>$vid));
+	}
+	catch(Exception $e){		
+		$transaction->rollback();
+		return;
+	}
+
+	foreach($airs as $air){
+		db_query("INSERT INTO {gis_airspace_air} (vid, id) VALUES (:vid, :id)",array(':vid'=>$vid, ':id'=>$air->id));
+	}
+}
+
+function get_deco_intersection($vid){
+	$transaction = db_transaction();
+	try{
+	$decos = db_query("SELECT id FROM {gis_deco} d, {gis_airspaces} a WHERE a.vid=:vid AND ST_Intersects(a.the_geom, d.the_geom)= true",array(':vid'=>$vid));
+	}
+	catch(Exception $e){
+		$transaction->rollback();
+		return;
+	}
+
+	foreach($decos as $deco){
+		db_query("INSERT INTO {gis_airspace_deco} (vid, id) VALUES (:vid, :id)",array(':vid'=>$vid, ':id'=>$deco->id));
+	}
+
+}
+
+function get_dep_com_intersection($vid){
+	$transaction = db_transaction();
+	try{
+	$deps = db_query("SELECT id_geofla as id FROM {gis_departement} d, {gis_airspaces} a WHERE a.vid=:vid AND ST_Intersects(a.the_geom, ST_Transform(d.the_geom,4326))= true",array(':vid'=>$vid));
+	}
+	catch(Exception $e){
+		$transaction->rollback();
+		return;
+	}
+
+	foreach($deps as $dep){
+		db_query("INSERT INTO {gis_airspace_dep} (vid, id) VALUES (:vid, :id)",array(':vid'=>$vid, ':id'=>$dep->id));
+	}
+
+	$coms = db_query("SELECT id_geofla as id FROM {gis_communes} d, {gis_airspaces} a WHERE a.vid=:vid AND ST_Intersects(a.the_geom, ST_Transform(d.the_geom,4326))= true",array(':vid'=>$vid));
+
+	foreach($coms as $com){
+		db_query("INSERT INTO {gis_airspace_com} (vid, id) VALUES (:vid, :id)",array(':vid'=>$vid, ':id'=>$com->id));
+	}
+}
+
+function create_associated_image($title, $vid){ // Créer la static image associée au node.
+	$pixelWidth = 400; // La taille de la carte en pixel. 
+	
+	// J'ai besoin du centre de ma carte. ST_Centroid sait faire cela.
+	//dsm($vid);
+	$transaction = db_transaction();
+	try{
+		$center = db_query("SELECT ST_X(ST_Centroid(the_geom)) as x, ST_Y(ST_Centroid(the_geom)) as y FROM {gis_airspaces} WHERE vid=:vid",array(':vid'=>$vid))->fetchAll();
+	}
+	catch (Exception $e){
+		$transaction->rollback();
+		return;
+	}
+	//dsm($center);
+
+	// J'ai besoin de la bounding box de ma carte. ST_Envelope sait faire cela.
+	$minmax = db_query("SELECT ST_X(geom) x, ST_Y(geom) y
+FROM (SELECT (ST_DumpPoints(ST_Envelope(the_geom))).* FROM gis_airspaces WHERE vid=:vid) t", array(':vid'=>$vid))->fetchAll();
+	//dsm($minmax);
+	if (isset($minmax[0]) && isset($minmax[2])){
+		$GLOBE_WIDTH = 256; // A constant in Google's map projection
+		$west = $minmax[0]->x ;
+		$east = $minmax[2]->x;
+		$angle = $east - $west;
+		if ($angle < 0) {
+		  $angle += 360;
+		}
+		$zoom = round( log($pixelWidth * 360 / $angle / $GLOBE_WIDTH) / log(2)) - 1;
+		//dsm($zoom);
+	}
+
+	// J'ai besoin d'encoder le polyline en mode simplifié pour que l'url google ne dépasse pas 2000 charactères... ST_DumpPoints + ST_Simplify
+	$query = db_query("SELECT ST_X(geom) x, ST_Y(geom) y FROM (SELECT (ST_DumpPoints(ST_SimplifyPreserveTopology(the_geom,0.0001))).* FROM gis_airspaces WHERE vid=:vid) t",array(':vid'=>$vid));
+
+	$points = array();
+	foreach($query as $result){
+		$point = array($result->y, $result->x);
+		$points[] = $point;
+	}
+	if (count($points) >2){
+		require_once("Polyline.php"); // Une classe d'encodage des polylines à la façon google map.
+		$encoded = Polyline::Encode($points);
+		//dsm(strlen($encoded));
+		//dsm($encoded);
+		if (is_numeric($zoom) && is_numeric($center[0]->x) && is_numeric($center[0]->y) &&  strlen($encoded) < 1800 ){
+			// Download the static picture from Google !
+			file_put_contents("sites/all/files/airspace_images/".$vid.".jpg", file_get_contents("http://maps.googleapis.com/maps/api/staticmap?key=AIzaSyD0j7HUREhDcBlyvPwkLD8ICsfelgoLSIE&size=400x400&format=jpg&sensor=false&center=".$center[0]->y.",".$center[0]->x."&zoom=".$zoom."&path=fillcolor:0xAA000033|color:0xFFFFFF00|enc:".$encoded));
+		}
+	}
+}
+
+
+function airspace_perm() {
+  return array('access zone migration', 'access conversion zone');
+}
 
 /**
  * Implements hook_theme
@@ -32,6 +695,7 @@ function airspace_preprocess_page(&$variables, $hook) {
 	}
 }
 
+
 /**
  * Implements hook_menu
  */
@@ -39,14 +703,535 @@ function airspace_menu(){
 	$items['espace-aerien'] = array(
 	    'title' => 'Espace aérien',
 	    'page callback' => 'airspace_show',
+	    'page arguments' => array(1,2),
     	    'access arguments' => array('access content'),
     	    'type' => MENU_CALLBACK,
   	);
 
+	$items['conversion3d'] = array(
+	    'title' => 'Espace 3D',
+	    'page callback' => 'airspace_3d',
+    	    'access arguments' => array('access conversion zone'),
+    	    'type' => MENU_CALLBACK,	
+	);
+
+	$items['zone_erase'] = array(
+		'title' => 'Efface les zones aériennes sous content type Drupal',
+	    	'page callback' => 'airspace_drupal_erase',
+		'access arguments' => array('access zone migration'),
+    	    	'type' => MENU_CALLBACK,	
+	);
+
+	$items['zone_rebuild'] = array(
+		'title' => 'Reconstruis certains éléments des zones aériennes sous content type Drupal',
+	    	'page callback' => 'airspace_drupal_rebuild',
+		'page_arguments' => array(1),
+		'access arguments' => array('access zone migration'),
+    	    	'type' => MENU_CALLBACK,	
+	);
+
+	$items['zone_migration'] = array(
+		'title' => 'Migration des zones aériennes sous content type Drupal',
+	    	'page callback' => 'airspace_drupal_migration',
+    	    	'access arguments' => array('access zone migration'),
+    	    	'type' => MENU_CALLBACK,	
+	);
+
+	$items['airspace_real_import'] = array(
+		'title' => 'Import des données SIA sous Drupal',
+	    	'page callback' => 'airspace_real_import',
+    	    	'access arguments' => array('access content'),
+    	    	'type' => MENU_CALLBACK,	
+	);
+
+	$items['airspace_traitement'] = array(
+		'title' => "traitement d'un espace aérien",
+	    	'page callback' => 'airspace_traitement',
+    	    	'access arguments' => array('access content'),
+    	    	'type' => MENU_CALLBACK,	
+	);
+
+	$items['node/%node/cfd_intersection'] = array(
+		'title' => "Intersection CFD",
+	    	'page callback' => 'cfd_intersection',
+		'page arguments' => array(1),
+		'access callback' => 'airspace_type_check',
+    		'access arguments' => array(1),
+		'weight' => 111,
+    	    	'type' => MENU_LOCAL_TASK,
+	);
+
+	$items['node/%node/dessin'] = array(
+		'title' => "Dessin",
+	    	'page callback' => 'airspace_dessin',
+		'page arguments' => array(1),
+    	    	'access callback' => 'airspace_type_check',
+		'access arguments' => array(1),
+		'weight' => 110,
+    		'type' => MENU_LOCAL_TASK,
+	);
+	
 	return $items;	
 }
 
-function airspace_show(){
+
+function airspace_type_check($node) {
+  if ($node->type == 'espace_aerien') {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+function airspace_dessin($node, $type = NULL){
+
+	$revision = $node;
+	if ($type == 'draft'){
+		$revision = workbench_moderation_node_current_load($node);
+	}
+	drupal_add_js('https://maps.googleapis.com/maps/api/js?v=3.exp&sensor=false&key=AIzaSyD0j7HUREhDcBlyvPwkLD8ICsfelgoLSIE&libraries=drawing', 'external');
+	drupal_add_js(array('airspace' => array('vid' => $revision->vid)), 'setting');
+	drupal_add_js(drupal_get_path('module', 'airspace') . '/GeoJSON-to-Google-Maps/GeoJSON.js', array('type' => 'file'));
+	drupal_add_js(drupal_get_path('module', 'airspace') . '/v3_epoly.js', array('type' => 'file'));	
+	drupal_add_js(drupal_get_path('module', 'airspace') . '/airspace-dessin.js', array('type' => 'file'));	
+	drupal_add_css(drupal_get_path('module', 'airspace') . '/airspace-dessin.css', array('type' => 'file'));
+
+	//$output = "<p>On va pouvoir dessiner des zones !</p>";
+	$output = '<div id="map2d" style="width:400px; height:400px"></div>';
+
+	/*$lines = file("http://geolocalisation.ffvl.fr/sites/all/files/airspace_openair/".$node->vid.'.txt');
+	$openair = '<h4><b>Réel :</b></h4>';
+	// Affiche toutes les lignes du tableau comme code HTML, avec les numéros de ligne
+	foreach ($lines as $line_num => $line) {
+    		$openair .= "<p id='".$line_num."'> ".htmlspecialchars($line)."<br />\n";
+	}
+
+	$output .= '<div id="openair-source">'.$openair.'</div>';*/
+	$output .= '<div id="pointlist"><h4><b>Kml to Openair :</b></h4></div>';
+
+	return $output;
+}
+
+
+function cfd_intersection($node){
+	$query = db_query("SELECT gt.date, gt.source FROM node n INNER JOIN gis_airspaces ga ON ga.vid=n.vid INNER JOIN gis_tracks gt ON ST_Intersects(ga.the_geom, gt.geom ) = TRUE WHERE n.vid = :vid ORDER BY gt.date", array(':vid' => $node->vid))->fetchAll();
+	
+	$output = count($query).' intersection(s) en 2 dimensions ont été trouvée(s) :<br/>';
+
+	foreach($query as $result){
+		$output .= l($result->source, 'http://www.victorb.fr/visugps/visugps.html?track=http://parapente.ffvl.fr/sites/parapente.ffvl.fr/files/igcfiles/'.$result->source, array('attributes' => array('target' => '_blank')))."<br/>";
+	}
+
+	//http://www.victorb.fr/visugps/visugps.html?track=http://parapente.ffvl.fr/sites/parapente.ffvl.fr/files/igcfiles/2013-06-06-igcfile-153363-36289.igc
+	return $output;
+}
+
+
+/**
+ * Implements hook_block_info()
+ */
+function airspace_block_info(){
+	$blocks = array();
+	$blocks['airspace_changes'] = array(
+    		'info' => t("Les changements au niveau espace aérien en provennance du fichier FFVV"),
+  	);
+
+	return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function airspace_block_view($delta='') {
+  $block = array();
+ 
+  switch($delta) {
+    case 'airspace_changes' :
+      $block['content'] = airspace_changes_block_view();
+      break;
+  }
+ 
+  return $block;
+}
+
+
+function airspace_changes_block_view(){
+  $block = array(); 
+
+  $output = '';
+  $query = db_query("SELECT temp.*, ST_isvalidReason(temp.the_geom) as val ,perm.vid,perm.the_geom as permgeom, nod.title FROM gis_temporary_airspaces as temp LEFT JOIN gis_airspaces as perm ON temp.the_geom = perm.the_geom LEFT JOIN node AS nod ON nod.title = temp.name")->fetchAll();
+  
+  //dsm($query);
+  $i = 0;
+  foreach($query as $result){
+	if ($result->title == NULL && $result->permgeom == NULL){
+		$output .= "La zone <b>".$result->name ."</b> ne semble pas avoir de node associée.<br/>";
+		$i++;
+	}
+  }
+
+  if ($i > 1){
+ 	 $output .= "<a class='formbutton' href='/zone_migration'>Créer les nodes de toutes ces zones</a>";
+  }
+
+  // Block output in HTML with div wrapper
+  $block = array(
+    'message' => array(
+      '#type' => 'markup',
+      '#markup' => $output,
+    ),
+  );
+ 
+  return $block;
+}
+
+function airspace_drupal_erase(){
+	$query = db_query("SELECT nid FROM {node} WHERE type='espace_aerien' ");
+
+	$nids = array();
+	foreach($query as $result){
+		$nids[] = $result->nid;
+	}	
+
+	if (!empty($nids)){
+		node_delete_multiple($nids);	
+		return count($nids).' node ont été effacées';
+	}
+}
+
+function airspace_drupal_rebuild($type){
+	$query = db_query("SELECT nr.vid FROM {node_revision} nr INNER JOIN {node} n ON nr.nid=n.nid WHERE n.type='espace_aerien'");
+	if ($type == 'kml'){
+		$batch = 'batch_airspace_kml';
+	}
+
+	if (!isset($batch)){return "Séléctionner un type correct dans l'url (kml) pour reconstuire les zones";}	
+
+	 $operations = array();
+	 foreach($query as $result){
+				$operations[] = array($batch, array($result->vid) );
+	 }
+
+	$batch = array(
+		'operations' => $operations,
+		'finished' => 'batch_airspace_drupal_finished',
+	);
+
+	batch_set($batch);
+	batch_process("/");
+
+	return $batch;
+}
+
+function batch_airspace_kml($op, &$context){
+	$query = db_query("SELECT nr.vid, nr.title, rc.field_classe_value as class, rplan.field_plancher_value as floor, rplaf.field_plafond_value as ceiling
+FROM node_revision nr 
+INNER JOIN field_revision_field_classe rc ON nr.vid = rc.revision_id 
+INNER JOIN field_revision_field_plancher rplan ON nr.vid = rplan.revision_id INNER JOIN field_revision_field_plafond rplaf ON nr.vid = rplaf.revision_id 
+WHERE nr.vid=:vid", array(':vid' => $op ))->fetchAll();
+
+	if (!isset($query[0]) || !isset($query[0]->class) || !isset($query[0]->floor) || !isset($query[0]->ceiling) ){
+		//watchdog('Airspace migration to drupal', "Aucun espace ne correspond a cet identifiant %id", array('%id'=>$op) , "WATCHDOG_ERROR");
+		return("Mauvaise requête");
+	}
+
+	delete_associated_kml($op);		
+	delete_associated_kml3d($op);
+	create_kml_from_geom($op, $query[0]->title, $query[0]->ceiling, $query[0]->floor, $query[0]->class);
+	create_geom_3d($op, $query[0]->title, $query[0]->ceiling, $query[0]->floor, $query[0]->class);
+
+	$context['results'][] = $op;
+	$context['message'] = t('Traitement de la zone "@id"', array('@id' => $op));
+
+	
+}
+
+
+function airspace_traitement(){
+	include_once("altiphp/alti.php");
+	//$service = new alti\Alti(array('source' => 'srtmpostgis', 'dbname' => 'srtm', 'dbuser' => 'drupal', 'dbpassword' => 'Drupal779'));
+	$service = new alti\Alti(array('source' => 'srtmtiles', 'cache' => 'sites/all/modules/airspace/data', 'httpbackend' => 'curl'));
+
+	dsm($service->altitude(0, 41));	
+
+	$op = 50;
+	$output = "salut";
+	
+	// J'attrappe le polygone de base en 2D point par point.
+	$query = db_query("SELECT gid id, floor plancher, ceiling plafond, ST_X(geom) x, ST_Y(geom) y FROM
+(SELECT gid, floor, ceiling, (ST_DumpPoints(the_geom)).* FROM gis_temporary_airspaces WHERE gid=:id) t", array(':id'=>$op))->fetchAll();
+	dsm($query);
+
+	if (!isset($query[0]) || !isset($query[0]->plafond) || !isset($query[0]->plancher) ){
+		return("Mauvaise requête");
+		watchdog('Airspace 3d', "Aucun espace ne correspond a cet identifiant %id", array('%id'=>$op) , "WATCHDOG_ERROR");
+		db_query("DELETE FROM gis_temporary_airspaces WHERE gid=:id", array(':id'=>$op));
+	}
+
+	$plafond = _get_real_alti($query[0]->plafond);	// Je detecte le plaf. C'est un array (type, altitude).
+	$plancher = _get_real_alti($query[0]->plancher); // Je detecte le plancher. Idem.
+	dsm($plafond);
+	
+	//A partir de là je dois gérer les polygones des espaces aériens si leur altitude est relative au sol. En absolue c'est plus simple cf. plus bas.
+	// Je peux connaître l'altitude absolue de points donnés via SRTM et altiphp... => https://github.com/arenevier/altiphp/blob/master/alti.php
+	// Si le polygone est en relatif, je vais attrapper une grille de points le constituant et déterminer pour chaque point quelle est l'altitude absolue. En fonction de cette grille et de ces points et de leur altitude, je vais reconstuire le polygone pour qu'il suive le sol (comme en relatif).
+	if ($plafond[1] == 'relativeToGround'){
+		// J'attrape la box 2d du polygone pour en avoir les coordonnées min et max :
+		//$query = db_query("SELECT ST_X(geom), ST_Y(geom) FROM (SELECT (ST_DumpPoints(box2d(the_geom))).* FROM gis_temporary_airspaces WHERE gid=50) t");
+		// J'ai mieux que de construire une grille à l'intérieur de la box2d et de vérifier si chaque point est dedans ou dehors !! 
+		// => makegrid ! http://gis.stackexchange.com/questions/4663/how-to-create-regular-point-grid-inside-a-polygon-in-postgis
+		$query = db_query("SELECT ST_X(geom) x, ST_Y(geom) y FROM (SELECT (st_dump(makegrid(the_geom,10000,4326))).* from gis_temporary_airspaces WHERE gid=:id) t", array(':id'=>$op))->fetchAll();
+		dsm($query);
+		foreach($query as $result){
+			$altisol = round($service->altitude($result->x, $result->y));
+			dsm($altisol);
+		}
+	}
+
+	return $output;
+}
+
+
+function airspace_real_import(){
+        // include_once("pdf2text.php"); // Real import from SIA pdf files.
+	// $result = pdf2text ('https://www.sia.aviation-civile.gouv.fr/aip/enligne/fr/..%5CPDF_AIPparSSection%5CAIP%20FRANCE%5CAD%5C1%5C1306_AD-1.7.pdf');
+	// dsm($result);
+	
+	// Download the latest file from FFVV
+	file_put_contents("sites/all/modules/airspace/airspace.txt", file_get_contents("http://s289271336.onlinehome.fr/dossiers_ffvv/files/__AIRSPACE_latest.txt"));
+	
+	openair_to_postgis("sites/all/modules/airspace/airspace.txt", 'DROP');
+	
+	drupal_goto('zone_migration');
+}
+
+
+function openair_to_postgis($file, $mode){
+	$basepath = drupal_get_path('module', 'airspace'); // Getting module base path.
+	$operand = "-d";
+	if ($mode == "APPEND"){
+		$operand = "-a"; 
+	}
+
+	exec("rm -R /var/www/".$basepath."/ESRI"); // Cleanup old ESRI directory
+	mkdir($basepath."/ESRI"); // Build a new one.
+
+	exec('ogr2ogr -f "ESRI Shapefile" /var/www/'.$basepath.'/ESRI  /var/www/'.$file); // Openair to shp.
+	$command = 'shp2pgsql '.$operand.' -s 4326 /var/www/'.$basepath.'/ESRI/airspaces.shp gis_temporary_airspaces | psql -d gis -U drupal';
+	$exec = exec($command . ' 2>&1', $so, $return); // Shp to GIS. Drop table - Build a new one.
+ 	
+	if($return != 0){
+		drupal_set_message("Une erreur est survenue en essayant d'importer en base le fichier openair...", 'error');
+		dsm($so);
+	}
+	else{
+		drupal_set_message("Importation dans la base de données espaces aériens temporaires FFVL réussie !");
+	}
+}
+
+
+function airspace_drupal_migration(){
+	
+	//$num_operations = db_query("SELECT count(gid) FROM {gis_temporary_airspaces}")->fetchField();
+	$query = db_query("SELECT temp.*, ST_isvalidReason(temp.the_geom) as val ,perm.vid,perm.the_geom as permgeom, nod.title FROM gis_temporary_airspaces as temp LEFT JOIN gis_airspaces as perm ON temp.the_geom = perm.the_geom LEFT JOIN node AS nod ON nod.title = temp.name")->fetchAll();
+  
+	  //$num_operations = 0;
+	  $operations = array();
+	  foreach($query as $result){
+		if ($result->title == NULL && $result->permgeom == NULL){
+			//$output .= "La zone <b>".$result->name ."</b> ne semble pas avoir de node associée.<br/>";
+			//$num_operations++;
+			$operations[] = array('batch_airspace_to_drupal', array($result->gid) );
+		}
+  	   }
+
+	//$operations = array();
+
+	/*for ($i = 0; $i<$num_operations; $i++) {
+		$operations[] = array('batch_airspace_to_drupal', array($i) );
+	}*/
+
+	$batch = array(
+		'operations' => $operations,
+		'finished' => 'batch_airspace_drupal_finished',
+	);
+
+	batch_set($batch);
+	batch_process("/");
+
+	return $batch;
+}
+
+function batch_airspace_to_drupal($op, &$context){
+	// La migration $op par $op !
+	$query = db_query("SELECT gid, name FROM {gis_temporary_airspaces} WHERE gid=:gid", array(':gid' => $op ))->fetchAll();
+
+	if (!isset($query[0]) || !isset($query[0]->name) ){
+		//watchdog('Airspace migration to drupal', "Aucun espace ne correspond a cet identifiant %id", array('%id'=>$op) , "WATCHDOG_ERROR");
+		return("Mauvaise requête");
+	}
+
+	$air = drupal_http_request("http://geolocalisation.ffvl.fr/".drupal_get_path('module', 'airspace')."/airspace.txt");
+	preg_match( '@^AC([a-zA-Z0-9\s])*\nAN(\s)*'.preg_quote($query[0]->name).'[a-zA-Z0-9\s=,:*\/_-]*\s$@ms' ,$air->data, $matches);
+	// openAir can be found at $matches[0]
+	$title = trim($matches[0]);
+
+	$context['results'][] = $query[0]->gid;
+	$context['message'] = t('Traitement de la zone "@id"', array('@id' => $query[0]->gid));
+
+	$node = new stdClass();
+  	$node->type = 'espace_aerien';
+	$node->language = LANGUAGE_NONE; // Or e.g. 'en' if locale is enabled
+	node_object_prepare($node);
+	$node->title = $query[0]->name;
+	$node->field_source[$node->language][0]['value'] = 'Fichier FFVV';
+	$node->field_coords[$node->language][0]['value'] = $title;
+	//node_submit($node);
+	node_save($node);
+}
+
+function batch_airspace_drupal_finished($success, $results, $operations){
+	if ($success) {
+		// Here we could do something meaningful with the results.
+		// We just display the number of nodes we processed...
+		drupal_set_message(t('@count zones traitées.', array('@count' => count($results)) ));
+		drupal_set_message(t('Le dernier résultat est "%final"', array('%final' => end($results))));
+	}
+	else {
+		// An error occurred.
+
+		// $operations contains the operations that remained unprocessed.
+		$error_operation = reset($operations);
+		drupal_set_message(t("Une erreur est survenue sur l'opération @operation avec les arguments : @args", array('@operation' => $error_operation[0], '@args' => print_r($error_operation[0], TRUE))));
+	}
+}
+
+
+function _get_real_alti($base){
+
+	$mode = 'absolute';
+	$num = preg_replace('/[^0-9]+/', '', $base); // J'ai les chiffres. Il ne manque plus qu'à les traiter. Dans tous les cas sauf en FL j'ai des Pieds !
+	
+	if ($num == ''){
+		$num = 0;
+	}
+
+	if ( strrpos($base, "fl") !== FALSE || strrpos($base, "FL") !== FALSE ){
+		$num = round(($num * 100)* 0.30478513);
+	}
+	else{
+		$num = round($num * 0.30478513);
+	}
+
+	// Maintenant que j'ai l'altitude, il ne reste qu'à déterminer le mode (Relatif au sol ou au niveau de la mer...)
+	if ( strrpos($base, "agl") !== FALSE || strrpos($base, "AGL") !== FALSE || strrpos($base, "asfc") !== FALSE || strrpos($base, "ASFC") !== FALSE  ){
+		$mode = 'relativeToGround';
+	}
+
+	return array($num, $mode);
+}
+
+function airspace_3d(){
+	$num_operations = db_query("SELECT count(gid) FROM {gis_temporary_airspaces}")->fetchField();
+	$operations = array();
+
+	for ($i = 0; $i<$num_operations; $i++) {
+		$operations[] = array('batch_airspace_3d', array($i) );
+	}
+
+	$batch = array(
+		'operations' => $operations,
+		'finished' => 'batch_airspace_3d_finished',
+	);
+
+	batch_set($batch);
+	batch_process("/");
+
+	return $batch; 
+}
+
+function batch_airspace_3d_finished($success, $results, $operations){
+	if ($success) {
+		// Here we could do something meaningful with the results.
+		// We just display the number of nodes we processed...
+		drupal_set_message(t('@count zones traitées.', array('@count' => count($results)) ));
+		drupal_set_message(t('Le dernier résultat est "%final"', array('%final' => end($results))));
+	}
+	else {
+		// An error occurred.
+		// $operations contains the operations that remained unprocessed.
+		$error_operation = reset($operations);
+		drupal_set_message(t("Une erreur est survenue sur l'opération @operation avec les arguments : @args", array('@operation' => $error_operation[0], '@args' => print_r($error_operation[0], TRUE))));
+	} 
+	
+}
+
+function batch_airspace_3d($op, &$context){
+
+	// Test pour le cron.
+	$output = "salut";
+
+	$query = db_query("SELECT gid id, floor plancher, ceiling plafond, ST_X(geom) x, ST_Y(geom) y FROM
+(SELECT gid, floor, ceiling, (ST_DumpPoints(the_geom)).* FROM gis_temporary_airspaces WHERE gid=:id) t", array(':id'=>$op))->fetchAll();
+
+	if (!isset($query[0]) || !isset($query[0]->plafond) || !isset($query[0]->plancher) ){
+		return("Mauvaise requête");
+		watchdog('Airspace 3d', "Aucun espace ne correspond a cet identifiant %id", array('%id'=>$op) , "WATCHDOG_ERROR");
+	}
+
+	$context['results'][] = $query[0]->id;
+	$context['message'] = t('Traitement de la zone "@id"', array('@id' => $query[0]->id));
+
+	$plafond = _get_real_alti($query[0]->plafond);	
+	$plancher = _get_real_alti($query[0]->plancher);
+
+	// dsm($plafond);
+	// dsm($plancher);
+
+	$l = count($query);
+
+	$poly = "geomfromtext('MULTIPOLYGON( ((";
+	$kml = '<MultiGeometry><Polygon><altitudeMode>absolute</altitudeMode><outerBoundaryIs><LinearRing><coordinates>';
+	for ($i = 0; $i < $l; $i++){ // Le polygone de base.
+		$poly .= $query[$i]->x.' '.$query[$i]->y.' '.$plancher[0].' ,'; // Connection vers le point suivant.
+		$kml .= $query[$i]->x.','.$query[$i]->y.','.$plancher[0].' ';
+	}
+	$poly .= $query[0]->x.' '.$query[0]->y.' '.$plancher[0] ; // Le retour au point de départ du polygone.
+	$kml .= $query[0]->x.','.$query[0]->y.','.$plancher[0] ;
+	$poly .= ')),';
+	$kml .= '</coordinates></LinearRing></outerBoundaryIs></Polygon>';
+
+	for ($i = 0; $i < $l; $i++){ // Les polygones des côtés.
+		if ($i%2 == 0){
+			if ($i == ($l-1)){break;}
+			$poly .= '(('.$query[$i]->x.' '.$query[$i]->y.' '.$plancher[0].' ,'.$query[$i]->x.' '.$query[$i]->y.' '.$plafond[0].' ,';	
+			$kml .= '<Polygon><altitudeMode>absolute</altitudeMode><outerBoundaryIs><LinearRing><coordinates>'.$query[$i]->x.','.$query[$i]->y.','.$plancher[0].' '.$query[$i]->x.','.$query[$i]->y.','.$plafond[0].' ';	
+		}	
+		else{
+			$poly .= $query[$i]->x.' '.$query[$i]->y.' '.$plafond[0].' ,'.$query[$i]->x.' '.$query[$i]->y.' '.$plancher[0].','.$query[($i-1)]->x.' '.$query[($i-1)]->y.' '.$plancher[0].')),'; // Il faut revenir au point de départ du polygone.
+			$kml .= $query[$i]->x.','.$query[$i]->y.','.$plafond[0].' '.$query[$i]->x.','.$query[$i]->y.','.$plancher[0].' '.$query[($i-1)]->x.','.$query[($i-1)]->y.','.$plancher[0].'</coordinates></LinearRing></outerBoundaryIs></Polygon>';
+		}
+	}
+
+	$poly .= '((';
+	$kml .= '<Polygon><altitudeMode>absolute</altitudeMode><outerBoundaryIs><LinearRing><coordinates>';
+
+	for ($i = 0; $i < $l; $i++){ // Le polygone du haut.
+		$poly .= $query[$i]->x.' '.$query[$i]->y.' '.$plafond[0].' ,'; // Connection vers le point suivant.
+		$kml .= $query[$i]->x.','.$query[$i]->y.','.$plafond[0].' ';
+	}
+	$poly .= $query[0]->x.' '.$query[0]->y.' '.$plafond[0] ; // Le retour au point de départ du polygone.
+	$kml .= $query[0]->x.','.$query[0]->y.','.$plafond[0] ;
+	
+	$poly .= ")) )', 4326)";
+	$kml .= '</coordinates></LinearRing></outerBoundaryIs></Polygon></MultiGeometry>';
+
+	db_query("UPDATE airspaces SET geom3d=".$poly.", geom3dkml=:kml WHERE gid=:id", array(':id'=>$op, ':kml'=>$kml));
+}
+
+function airspace_show($vid = '', $deco = ''){
+	//if (!isset($vids) )
+	$vids = explode(" ", $vid);
+	$decos = explode(" ", $deco);
 	$output = "";
 
 	drupal_add_js('https://www.google.com/jsapi', 'external');
@@ -55,7 +1240,7 @@ function airspace_show(){
 
 	$box = "<div id='selectZone' class='frame'>";
 	$class = '';
-	$query = db_query("SELECT * FROM {airspaces} ORDER BY class ASC, name");
+	$query = db_query("SELECT ga.vid, n.nid, n.title as name, rc.field_classe_value as class FROM {gis_airspaces} ga INNER JOIN {node} n ON ga.vid = n.vid INNER JOIN {field_revision_field_classe} rc ON ga.vid = rc.revision_id ORDER BY class ASC, name");
 	while ($data = $query->fetchObject()){
 		if ($class != $data->class){	
 			if ($class != ''){$box .= '</ul>';}
@@ -63,16 +1248,20 @@ function airspace_show(){
 			$cleanClass = str_replace(" ", "", $data->class);
 			$box .= "<ul class='zone' id='".$cleanClass."'><span id='".$cleanClass."' class='chef'>".$cleanClass.'</span>'; 
 		}
-		
-		$box .= "<li class='airspace' id='".$data->gid."'><input class='space' id='".$data->gid."' type='checkbox' value='".$data->gid."' name='".$data->name."' />".$data->name."</li>";
+		$addClass = '';
+		if (in_array($data->vid, $vids)){$addClass = ' requested';}
+			$box .= "<li class='airspace".$addClass."' id='".$data->vid."'><input class='space' id='".$data->vid."' type='checkbox' value='".$data->vid."' name='".$data->name."' />".$data->name."</li>";
 	}	
 	$box .= "</div>";
 
 
 	$box .= "<div id='selectSite' class='frame'><ul id='sitedeco'> <span id='alldeco' class='chef'> Décollages :</span>";
-	$query = db_query("SELECT * FROM {ffvl_deco} ORDER BY nom");
+	$query = db_query("SELECT * FROM {gis_deco}");
 	while ($data = $query->fetchObject()){
-		$box .= "<li class='site' id='".$data->id."'><input class='deco' id='".$data->id."' type='checkbox' value='".$data->id."' name='".$data->nom."' />".$data->nom."</li>";
+		$addClass = '';
+		if (in_array($data->id, $decos)){$addClass = ' requested';}
+	
+		$box .= "<li class='site".$addClass."' id='".$data->id."'><input class='deco' id='".$data->id."' type='checkbox' value='".$data->id."' name='".$data->nom."' />".$data->nom."</li>";
 	}
 	$box .= "</ul></div>";
 
@@ -83,6 +1272,7 @@ function airspace_show(){
 	$output .= " <input id='crosite' class='window' type='submit' value='Voir les décollages dans cette zone'>";
 	$output .= " <input id='windowspace' class='window' type='submit' value='Gérer les espaces'>";
 	$output .= " <input id='windowdeco' class='window' type='submit' value='Gérer les décos'>";
+	$output .= $vid." ".$deco;
 	$output .= " </div>";
 	return $output;
 

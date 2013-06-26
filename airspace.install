@@ -1,0 +1,271 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the airspace module.
+ */
+
+/*
+function airspace_install(){
+
+	$t = get_t();
+	$name = 'espace_aerien';
+	$espace = array(
+    		'type' => $name,
+    		'name' => $t('Espace aérien'),
+    		'base' => 'node_espace',
+    		'title_label' => $t('Nom'),
+    		'description' => $t('Un espace aérien'),
+    		'custom' => TRUE,
+  	);
+
+	$content_type = node_type_set_defaults($espace);
+	node_type_save($content_type);
+
+	variable_set('additional_settings__active_tab_' . $name, 'edit-menu');
+	variable_set('node_preview_' . $name, 2);
+	variable_set('node_options_' . $name, array(0 => 'status', 1 => 'promote'));
+	variable_set('node_submitted_' . $name, 0);
+	variable_set('menu_options_' . $name, array());
+	variable_set('menu_parent_' . $name, 'main-menu:0');
+
+	foreach (_espace_installed_fields() as $field) {
+		field_create_field($field);
+	}
+
+	foreach (_espace_installed_instances() as $instance) {
+		$instance['entity_type'] = 'node';
+		$instance['bundle'] = $espace['type'];
+		field_create_instance($instance);
+  	}
+}
+
+
+function _espace_installed_fields(){
+
+$t = get_t();
+
+return array(
+  'field_classe' => array(
+  	'translatable' => '0',
+  	'entity_types' => array(),
+  	'settings' => array(
+    		'max_length' => '255',
+  	),
+  	'storage' => array(
+    		'type' => 'field_sql_storage',
+    		'settings' => array(),
+    		'module' => 'field_sql_storage',
+    		'active' => '1',
+    		'details' => array(
+      			'sql' => array(
+        			'FIELD_LOAD_CURRENT' => array(
+          				'field_data_field_classe' => array(
+            					'value' => 'field_classe_value',
+            					'format' => 'field_classe_format',
+          				),
+        			),
+        			'FIELD_LOAD_REVISION' => array(
+          				'field_revision_field_classe' => array(
+            					'value' => 'field_classe_value',
+            					'format' => 'field_classe_format',
+          				),
+        			),
+      			), // sql,
+    		), // details,
+  	), // storage,
+  	'foreign keys' => array(
+    		'format' => array(
+      			'table' => 'filter_format',
+      				'columns' => array(
+        				'format' => 'format',
+      				),
+    			),
+  	),
+  	'indexes' => array(
+    		'format' => array(
+      			'format',
+    		),
+  	),
+  	'field_name' => 'field_classe',
+  	'type' => 'text',
+  	'module' => 'text',
+  	'active' => '1',
+  	'locked' => '0',
+  	'cardinality' => '1',
+  	'deleted' => '0',
+  	'columns' => array(
+    		'value' => array(
+      			'type' => 'varchar',
+      			'length' => '255',
+      			'not null' => FALSE,
+    		),
+    		'format' => array(
+      			'type' => 'varchar',
+      			'length' => 255,
+      			'not null' => FALSE,
+    		),
+  	),
+  	'bundles' => array(
+    		'node' => array(
+      			'espace_aerien',
+    		),
+  	),
+  ), // field_classe
+  'field_plancher' => array(
+  	'translatable' => '0',
+  	'entity_types' => array(),
+  	'settings' => array(
+    		'max_length' => '255',
+  	),
+  	'storage' => array(
+    		'type' => 'field_sql_storage',
+    		'settings' => array(),
+    		'module' => 'field_sql_storage',
+    		'active' => '1',
+    		'details' => array(
+      			'sql' => array(
+        			'FIELD_LOAD_CURRENT' => array(
+          				'field_data_field_plancher' => array(
+            					'value' => 'field_plancher_value',
+            					'format' => 'field_plancher_format',
+          				),
+        			),
+        			'FIELD_LOAD_REVISION' => array(
+          				'field_revision_field_plancher' => array(
+            					'value' => 'field_plancher_value',
+            					'format' => 'field_plancher_format',
+          				),
+        			),
+      			), // sql,
+    		), // details,
+  	), // storage,
+  	'foreign keys' => array(
+    		'format' => array(
+      			'table' => 'filter_format',
+      			'columns' => array(
+        			'format' => 'format',
+      			),
+    		),
+  	),
+  	'indexes' => array(
+    		'format' => array(
+      			'format',
+    		),
+  	),
+  	'field_name' => 'field_plancher',
+  	'type' => 'text',
+  	'module' => 'text',
+  	'active' => '1',
+  	'locked' => '0',
+  	'cardinality' => '1',
+  	'deleted' => '0',
+  	'columns' => array(
+    		'value' => array(
+      			'type' => 'varchar',
+      			'length' => '255',
+      			'not null' => FALSE,
+    		),
+    		'format' => array(
+      			'type' => 'varchar',
+      			'length' => 255,
+      			'not null' => FALSE,
+    		),
+  	),
+  	'bundles' => array(
+    		'node' => array(
+      			'espace_aerien',
+    		),
+  	),
+  ), // field_plancher
+	
+
+);
+}
+
+function _espace_installed_instances(){
+
+	$t = get_t();
+	return array(
+		'field_classe' => array(
+  			'label' => 'classe',
+  			'widget' => array(
+    				'weight' => '-4',
+    				'type' => 'text_textfield',
+    				'module' => 'text',
+    				'active' => 1,
+    				'settings' => array(
+      					'size' => '60',
+    				),
+  			),
+  			'settings' => array(
+    				'text_processing' => '0',
+    				'user_register_form' => FALSE,
+  			),
+  			'display' => array(
+    				'default' => array(
+      					'label' => 'above',
+      					'type' => 'text_default',
+      					'settings' => array(),
+      					'module' => 'text',
+      					'weight' => 0,
+   	 			),
+    				'teaser' => array(
+      					'type' => 'hidden',
+      					'label' => 'above',
+      					'settings' => array(),
+      					'weight' => 0,
+    				),
+  			),
+  			'required' => 1,
+  			'description' => "La classe de l'espace aérien",
+  			'default_value' => NULL,
+  			'field_name' => 'field_classe',
+  			'entity_type' => 'node',
+  			'bundle' => 'espace_aerien',
+  			'deleted' => '0',
+		), // field_classe,
+		'field_plancher' => array(
+  			'label' => 'plancher',
+  			'widget' => array(
+    				'weight' => '-3',
+    				'type' => 'text_textfield',
+    				'module' => 'text',
+    				'active' => 1,
+    				'settings' => array(
+      					'size' => '60',
+    				),
+  			),
+  			'settings' => array(
+    				'text_processing' => '0',
+    				'user_register_form' => FALSE,
+  			),
+  			'display' => array(
+    				'default' => array(
+      					'label' => 'above',
+      					'type' => 'text_default',
+      					'settings' => array(),
+      					'module' => 'text',
+      					'weight' => 1,
+    				),
+    				'teaser' => array(
+      					'type' => 'hidden',
+      					'label' => 'above',
+      					'settings' => array(),
+      					'weight' => 0,
+    				),
+  			),
+  			'required' => 1,
+  			'description' => "Le plancher de l'espace aérien",
+  			'default_value' => NULL,
+  			'field_name' => 'field_plancher',
+  			'entity_type' => 'node',
+  			'bundle' => 'test',
+  			'deleted' => '0',
+	)
+);
+
+
+}
+
+*/

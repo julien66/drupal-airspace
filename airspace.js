@@ -31,6 +31,8 @@ Drupal.behaviors.airspace = {
 	initCB : function(instance){
 		ge = instance;
 	      	ge.getWindow().setVisibility(true);
+		ge.getNavigationControl().setVisibility(ge.VISIBILITY_SHOW);
+
 		$("li.airspace input:checkbox").attr('checked', false);
 
 		google.earth.addEventListener(ge.getView(), 'viewchangeend', function() {
@@ -41,7 +43,7 @@ Drupal.behaviors.airspace = {
   
   			// ensure that all hit tests succeeded (i.e. the viewport is 2d-mappable)
   			if (hitTestTL && hitTestTR && hitTestBL && hitTestBR) {
-				currentBound = "GeomFromText('Polygon(("+
+				currentBound = "ST_GeomFromText('Polygon(("+
 					hitTestTL.getLongitude() +" "+ hitTestTL.getLatitude()+", "+
 					hitTestTR.getLongitude() +" "+ hitTestTR.getLatitude()+", "+
 					hitTestBR.getLongitude() +" "+ hitTestBR.getLatitude()+", "+
@@ -120,7 +122,9 @@ Drupal.behaviors.airspace = {
                     			url: '/services-getspace/getspace/'+request,
                     			dataType: 'json',
                     			success: function(reponse){
-						Drupal.behaviors.airspace.addKmlTrackFromString(reponse[0], id); // A reprendre ici besoin de plus !
+						console.log(reponse);
+						Drupal.behaviors.airspace.addKml(reponse[0], reponse[1]);
+						//Drupal.behaviors.airspace.addKmlTrackFromString(reponse.dkml, parseInt(reponse.vid), reponse.name, (reponse.class +": " +reponse.floor+" / "+reponse.ceiling),  reponse.class.replace(/ /g,""), reponse.floor, reponse.ceiling ); // A reprendre ici besoin de plus !
 					},
                 		});
 				}
@@ -156,6 +160,13 @@ Drupal.behaviors.airspace = {
 				}
     			}
 		});
+
+		$(".requested").each(function(index, value){
+			var id = $(this).attr('id');
+			$('li#'+id+' input').trigger('click');
+			$('li#'+id+' input').trigger('change');
+			console.log(id);
+		});
 	},
 
 	failureCB : function(){
@@ -169,13 +180,13 @@ Drupal.behaviors.airspace = {
 		});
 
 		for (var i=0; i<reponse.length; i++){
-			if (  $('#selectZone li#'+reponse[i].gid+" input:checkbox").is(':checked')){
+			if (  $('#selectZone li#'+reponse[i][1]+" input:checkbox").is(':checked')){
 			}
 			else {	
-				$('#selectZone li#'+reponse[i].gid+" input:checkbox").attr('checked', 'checked');
-				$('#selectZone li#'+reponse[i].gid).show();
-				
-				Drupal.behaviors.airspace.addKmlTrackFromString(reponse[i].kml, parseInt(reponse[i].gid), reponse[i].name, (reponse[i].class +": " +reponse[i].floor+" / "+reponse[i].ceiling),  reponse[i].class.replace(/ /g,""), reponse[i].floor, reponse[i].ceiling );		
+				$('#selectZone li#'+reponse[i][1]+" input:checkbox").attr('checked', 'checked');
+				$('#selectZone li#'+reponse[i][1]).show();
+				Drupal.behaviors.airspace.addKml(reponse[i][0], reponse[i][1]);
+				//Drupal.behaviors.airspace.addKmlTrackFromString(reponse[i].dkml, parseInt(reponse[i].vid), reponse[i].name, (reponse[i].class +": " +reponse[i].floor+" / "+reponse[i].ceiling),  reponse[i].class.replace(/ /g,""), reponse[i].floor, reponse[i].ceiling );		
 			}		
 		}
 	}, 
@@ -216,37 +227,17 @@ Drupal.behaviors.airspace = {
 		 ge.getFeatures().removeChild(sites[id]);
 	},
 
-	addKmlTrackFromString : function(kmlstring, id, title, description,clas, plancher, plafond){
+	addKml : function(finalkml, vid){
+		var kmlObject = ge.parseKml(finalkml);
+		spaces[vid] = kmlObject;
+		ge.getFeatures().appendChild(kmlObject);
+	},
+
+	/*addKmlTrackFromString : function(kmlstring, id, title, description,clas, plancher, plafond){
 		var stringAlti = "";
 		if (!title){title = "Test"; }
 		if (!description){description = "";}
 		if (!clas){clas = "D";}
-
-		/*if (plancher.indexOf("sfc") !== -1 || plancher.indexOf("SFC") !== -1){ // Si la zone va jusqu'au sol je veux extruder.
-			var altitude = plafond.replace(/\D/g,"");// J'attrape le plafond.
-			var mode = "";
-			if ( plafond.indexOf("AMSL") !== -1 || plafond.indexOf("amsl") !== -1 ){
-				mode = "absolute";
-			}
-			else if ( plafond.indexOf("FL") !== -1 || plafond.indexOf("fl") !== -1 ){
-				mode = "absolute";
-				altitude = (altitude * 100)* 0.30478513;
-			}
-			else if ( plafond.indexOf("AGL") !== -1 || plafond.indexOf("agl") !== -1 || plafond.indexOf("ASFC") !== -1 || plafond.indexOf("asfc") !== -1 ){
-				mode = "relativeToGround";
-			}
-			stringAlti = "<altitudeMode>"+mode+"</altitudeMode><extrude>1</extrude>";
-			console.log(altitude +" "+title);
-		}*/
-
-		//console.log(clas+" plancher:"+plancher+" plafond:"+plafond);
-		/*if (stringAlti != ""){
-			var inject = kmlstring.indexOf("<Polygon>") + 9;
-			var kmlstring = [kmlstring.slice(0, inject), stringAlti, kmlstring.slice(inject)].join('');
-		}*/
-		
-		
-		//console.log(kmlstring);	
 
 		var finalkml = 
 			'<?xml version="1.0" encoding="UTF-8"?>' +
@@ -255,128 +246,119 @@ Drupal.behaviors.airspace = {
 			'<Document>' +
 			'    <Style id="A">' +
       			'	<LineStyle>' +
-        		'		<color>7fff7519</color>' +
+        		'		<color>64F01414</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>7fe60000</color>' +
+        		'		<color>1eF01414</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'    <Style id="B">' +
       			'	<LineStyle>' +
-        		'		<color>7fff7519</color>' +
+        		'		<color>64F01414</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>7fe60000</color>' +
+        		'		<color>1eF01414</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'    <Style id="C">' +
       			'	<LineStyle>' +
-        		'		<color>7fff7519</color>' +
+        		'		<color>64F01414</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>7fe60000</color>' +
+        		'		<color>1eF01414</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'    <Style id="CTR">' +
       			'	<LineStyle>' +
-        		'		<color>7fff7519</color>' +
+        		'		<color>641400FF</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>7fe60000</color>' +
+        		'		<color>1e1400FF</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'    <Style id="D">' +
       			'	<LineStyle>' +
-        		'		<color>7fff7519</color>' +
+        		'		<color>64F01414</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>7fe60000</color>' +
+        		'		<color>1eF01414</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'    <Style id="P">' +
       			'	<LineStyle>' +
-        		'		<color>7fff7519</color>' +
+        		'		<color>641400FF</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>7fe60000</color>' +
+        		'		<color>1e1400FF</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'    <Style id="R">' +
       			'	<LineStyle>' +
-        		'		<color>7fff7519</color>' +
+        		'		<color>641400FF</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>7fe60000</color>' +
+        		'		<color>1e1400FF</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'    <Style id="GP">' +
       			'	<LineStyle>' +
-        		'		<color>7f00ffff</color>' +
+        		'		<color>643CFF14</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>7f00ff00</color>' +
-      			'	</PolyStyle>' +
-    			'</Style>' +
-			'    <Style id="R">' +
-      			'	<LineStyle>' +
-        		'		<color>5014F0F0</color>' +
-        		'		<width>2</width>' +
-      			'	</LineStyle>' +
-      			'	<PolyStyle>' +
-        		'		<color>5014F0F0</color>' +
+        		'		<color>143CFF14</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'<Style id="E">' +
       			'	<LineStyle>' +
-        		'		<color>7f00ffff</color>' +
+        		'		<color>64F0B414</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>7f00ff00</color>' +
+        		'		<color>1eF0B414</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'<Style id="Q">' +
       			'	<LineStyle>' +
-        		'		<color>50F06414</color>' +
+        		'		<color>64F01414</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>50F06414</color>' +
+        		'		<color>1eF01414</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'<Style id="W">' +
       			'	<LineStyle>' +
-        		'		<color>501478FA</color>' +
+        		'		<color>64F01414</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>501478FA</color>' +
+        		'		<color>1eF01414</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'<Style id="ZRT">' +
       			'	<LineStyle>' +
-        		'		<color>50000014</color>' +
+        		'		<color>64F01414</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>50000014</color>' +
+        		'		<color>14F01414</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
 			'<Style id="VL">' +
       			'	<LineStyle>' +
-        		'		<color>501400F0</color>' +
+        		'		<color>643CFF14</color>' +
         		'		<width>2</width>' +
       			'	</LineStyle>' +
       			'	<PolyStyle>' +
-        		'		<color>501400F0</color>' +
+        		'		<color>143CFF14</color>' +
       			'	</PolyStyle>' +
     			'</Style>' +
   			'  <Placemark>' +
@@ -387,11 +369,13 @@ Drupal.behaviors.airspace = {
   			'  </Placemark>' +
 			' </Document>' +
   			'</kml>' ;
+
+		//console.log(finalkml);
 	
 		var kmlObject = ge.parseKml(finalkml);
 		spaces[id] = kmlObject;
 		ge.getFeatures().appendChild(kmlObject);
-	},
+	},*/
 
 
 	addKmlMarkerFromString : function(kmlstring, id, title){
